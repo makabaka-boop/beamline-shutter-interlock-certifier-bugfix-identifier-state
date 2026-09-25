@@ -5,6 +5,7 @@ import { computeChanges, solveWorkspace } from './core/sat';
 import { sortByUtf8 } from './core/utf8';
 import { downloadText, serializeTable } from './lib/export';
 import { SAMPLE_WORKSPACE } from './lib/sample';
+import { cycleLockState, initialTable, toggleLock } from './lib/state';
 import { ImportPanel } from './components/ImportPanel';
 import { ShutterTable } from './components/ShutterTable';
 import { RulesPanel } from './components/RulesPanel';
@@ -14,12 +15,6 @@ interface Preview {
   outcome: SolveOutcome;
   /** 认证时的规则版本；与当前 specRev 不同则已失效 */
   specRev: number;
-}
-
-function initialTable(ids: string[]): Record<string, ShutterState> {
-  const t: Record<string, ShutterState> = {};
-  for (const id of ids) t[id] = 'CLOSED';
-  return t;
 }
 
 export default function App() {
@@ -54,24 +49,13 @@ export default function App() {
   };
 
   const handleToggleLock = (id: string) => {
-    setLocks((prev) => {
-      const next = { ...prev };
-      if (id in next) {
-        delete next[id];
-      } else {
-        // 锁定到该快门当前表值，随后可用按钮切换锁定状态
-        next[id] = table[id];
-      }
-      return next;
-    });
+    // 未锁定时锁定到该快门当前表值，随后可用按钮切换锁定状态
+    setLocks((prev) => toggleLock(prev, id, table[id]));
     setSpecRev((r) => r + 1);
   };
 
   const handleCycleLockState = (id: string) => {
-    setLocks((prev) => {
-      if (!(id in prev)) return prev;
-      return { ...prev, [id]: prev[id] === 'OPEN' ? 'CLOSED' : 'OPEN' };
-    });
+    setLocks((prev) => cycleLockState(prev, id));
     setSpecRev((r) => r + 1);
   };
 

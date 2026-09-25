@@ -91,3 +91,112 @@ describe('导入解析', () => {
     expect(r2.errors.join('\n')).toContain('规则数量');
   });
 });
+
+describe('特殊快门 ID（OR / __proto__ / constructor / toString）', () => {
+  it('OR 可登记为快门 ID 并在规则两个文字位置引用（含省略连接词）', () => {
+    const text = [
+      '[shutters]',
+      'OR',
+      'S1',
+      'S2',
+      '[rules]',
+      'OR OPEN OR S1 CLOSED',
+      'S1 OPEN OR CLOSED',
+      'OR CLOSED S2 OPEN',
+      'S1 OPEN or OR CLOSED',
+    ].join('\n');
+    const r = parseWorkspace(text);
+    expect(r.errors).toEqual([]);
+    expect(r.ok).toBe(true);
+    expect(r.workspace?.ids).toEqual(['OR', 'S1', 'S2']);
+    expect(r.workspace?.rules).toHaveLength(4);
+    // 连接词在中间：OR 是第一文字的 ID
+    expect(r.workspace?.rules[0]).toMatchObject({
+      a: { id: 'OR', state: 'OPEN' },
+      b: { id: 'S1', state: 'CLOSED' },
+    });
+    // 无连接词：第 3 个记号即第二文字的 ID（此处为 OR）
+    expect(r.workspace?.rules[1]).toMatchObject({
+      a: { id: 'S1', state: 'OPEN' },
+      b: { id: 'OR', state: 'CLOSED' },
+    });
+    expect(r.workspace?.rules[2]).toMatchObject({
+      a: { id: 'OR', state: 'CLOSED' },
+      b: { id: 'S2', state: 'OPEN' },
+    });
+    // 小写连接词 + OR 作为第二文字
+    expect(r.workspace?.rules[3]).toMatchObject({
+      a: { id: 'S1', state: 'OPEN' },
+      b: { id: 'OR', state: 'CLOSED' },
+    });
+  });
+
+  it('OR 作为 ID 时同一规则内重复出现仍拒绝', () => {
+    const r = parseWorkspace('[shutters]\nOR\nS1\n[rules]\nOR OPEN OR OR CLOSED\n');
+    expect(r.ok).toBe(false);
+    expect(r.workspace).toBeNull();
+    expect(r.errors.join('\n')).toContain('重复出现');
+  });
+
+  it('__proto__ / constructor / toString 可登记并在规则中引用', () => {
+    const text = [
+      '[shutters]',
+      '__proto__',
+      'constructor',
+      'toString',
+      '[rules]',
+      '__proto__ OPEN OR constructor CLOSED',
+      'toString OPEN __proto__ CLOSED',
+    ].join('\n');
+    const r = parseWorkspace(text);
+    expect(r.errors).toEqual([]);
+    expect(r.ok).toBe(true);
+    expect(r.workspace?.ids).toEqual(['__proto__', 'constructor', 'toString']);
+    expect(r.workspace?.rules).toHaveLength(2);
+    expect(r.workspace?.rules[0]).toMatchObject({
+      a: { id: '__proto__', state: 'OPEN' },
+      b: { id: 'constructor', state: 'CLOSED' },
+    });
+    expect(r.workspace?.rules[1]).toMatchObject({
+      a: { id: 'toString', state: 'OPEN' },
+      b: { id: '__proto__', state: 'CLOSED' },
+    });
+  });
+
+  it('普通编号与 OR 连接语法保持兼容（可省略、可小写、可重复书写）', () => {
+    const text = [
+      '[shutters]',
+      'A',
+      'B',
+      '[rules]',
+      'A OPEN OR B CLOSED',
+      'A OPEN B CLOSED',
+      'A OPEN or B CLOSED',
+      'A OPEN OR OR B CLOSED',
+    ].join('\n');
+    const r = parseWorkspace(text);
+    expect(r.errors).toEqual([]);
+    expect(r.ok).toBe(true);
+    expect(r.workspace?.rules).toHaveLength(4);
+    for (const rule of r.workspace!.rules) {
+      expect(rule).toMatchObject({
+        a: { id: 'A', state: 'OPEN' },
+        b: { id: 'B', state: 'CLOSED' },
+      });
+    }
+  });
+
+  it('连接词位置非法或记号数量错误仍整份拒绝', () => {
+    const bad = [
+      'OR A OPEN B CLOSED', // 连接词出现在行首
+      'A OPEN B CLOSED OR', // 连接词出现在行尾
+      'A OPEN OR B CLOSED EXTRA', // 记号过多
+      'A OPEN B', // 记号不足
+    ];
+    for (const line of bad) {
+      const r = parseWorkspace(`[shutters]\nA\nB\n[rules]\n${line}\n`);
+      expect(r.ok, `「${line}」应被拒绝`).toBe(false);
+      expect(r.workspace).toBeNull();
+    }
+  });
+});

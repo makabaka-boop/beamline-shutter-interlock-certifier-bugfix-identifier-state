@@ -22,4 +22,21 @@ describe('采纳稿序列化', () => {
     expect(serializeTable(ws, t)).toBe(serializeTable(ws, t));
     expect(serializeTable(ws, t)).toBe('A CLOSED\nB OPEN\nC CLOSED\n');
   });
+
+  it('特殊 ID（__proto__ / constructor / toString / OR）逐行导出且与快门一一对应', () => {
+    const ws: Workspace = {
+      ids: ['toString', '__proto__', 'OR', 'constructor'],
+      rules: [],
+    };
+    const table: Record<string, ShutterState> = Object.fromEntries([
+      ['__proto__', 'OPEN'],
+      ['constructor', 'CLOSED'],
+      ['toString', 'OPEN'],
+      ['OR', 'CLOSED'],
+    ]);
+    // UTF-8 字节序：OR < __proto__ < constructor < toString；不得出现缺失或 [object Object]
+    expect(serializeTable(ws, table)).toBe(
+      'OR CLOSED\n__proto__ OPEN\nconstructor CLOSED\ntoString OPEN\n',
+    );
+  });
 });

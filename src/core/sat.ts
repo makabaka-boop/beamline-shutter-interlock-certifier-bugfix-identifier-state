@@ -222,8 +222,14 @@ export function solveWorkspace(
 
   // 可行：按 ID 的 UTF-8 字节序逐变量贪试 CLOSED；
   // 已确定的前缀作为单位边并入 units，候选值单独以 extraUnit 试设，重算 SCC 检验。
-  const assignment: Record<string, ShutterState> = {};
-  const units: Record<string, ShutterState> = { ...locks };
+  // 快门 ID 允许为 __proto__ 等名称：units 用无原型对象承载、assignment 由
+  // Object.fromEntries 构造，保证每个 ID 都落为独立的自有数据属性，
+  // 不会触发 Object.prototype 的 __proto__ 访问器而丢失条目。
+  const assignmentEntries: Array<[string, ShutterState]> = [];
+  const units: Record<string, ShutterState> = Object.assign(
+    Object.create(null),
+    locks,
+  );
   for (let i = 0; i < base.sortedIds.length; i++) {
     const id = base.sortedIds[i];
     const tryState = (state: ShutterState): boolean => {
@@ -244,11 +250,15 @@ export function solveWorkspace(
       // 不应发生：基础图可满足且此前前缀均为可行扩展
       throw new Error(`贪心求解异常：快门 ${id} 两个状态均不可扩展`);
     }
-    assignment[id] = chosen;
+    assignmentEntries.push([id, chosen]);
     units[id] = chosen;
   }
 
-  return { kind: 'sat', assignment, orderedIds: base.sortedIds };
+  return {
+    kind: 'sat',
+    assignment: Object.fromEntries(assignmentEntries),
+    orderedIds: base.sortedIds,
+  };
 }
 
 /** 比对方案与当前快门表，按 UTF-8 字节序列出改动。 */

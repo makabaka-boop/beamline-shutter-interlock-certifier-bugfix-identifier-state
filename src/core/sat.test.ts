@@ -467,3 +467,170 @@ describe('规模与性能（300 快门 / 3000 规则）', () => {
     }
   });
 });
+
+/* ------------- 特殊快门 ID：__proto__ / constructor / toString / OR ------------- */
+
+/**
+ * 与文件顶部暴力枚举 oracle 相同的语义，但用 Map 承载赋值，
+ * 使 __proto__ 等 ID 也能正确求值（普通对象会被 __proto__ 访问器吞掉）。
+ */
+function bruteLexMinSafe(
+  ids: string[],
+  clauses: Array<[{ id: string; state: ShutterState }, { id: string; state: ShutterState }]>,
+  locks: Record<string, ShutterState>,
+): Record<string, ShutterState> | null {
+  const sorted = [...ids].sort(compareUtf8);
+  const n = sorted.length;
+  for (let mask = 0; mask < 1 << n; mask++) {
+    const a = new Map<string, ShutterState>();
+    for (let i = 0; i < n; i++) {
+      a.set(sorted[i], ((mask >> (n - 1 - i)) & 1) === 0 ? 'CLOSED' : 'OPEN');
+    }
+    let ok = true;
+    for (const [id, s] of Object.entries(locks)) {
+      if (a.get(id) !== s) {
+        ok = false;
+        break;
+      }
+    }
+    if (ok) {
+      for (const [p, q] of clauses) {
+        if (a.get(p.id) !== p.state && a.get(q.id) !== q.state) {
+          ok = false;
+          break;
+        }
+      }
+    }
+    if (ok) return Object.fromEntries(a);
+  }
+  return null;
+}
+
+describe('特殊快门 ID（__proto__ / constructor / toString / OR）', () => {
+  const specialIds = ['OR', '__proto__', 'constructor', 'toString'];
+
+  it('最小方案完整：每个特殊 ID 都是独立自有条目', () => {
+    const ws: Workspace = { ids: [...specialIds], rules: [] };
+    const r = solveWorkspace(ws, {});
+    expect(r.kind).toBe('sat');
+    if (r.kind !== 'sat') return;
+    // UTF-8 字节序：OR(0x4F…) < __proto__(0x5F…) < constructor(0x63…) < toString(0x74…)
+    expect(r.orderedIds).toEqual(['OR', '__proto__', 'constructor', 'toString']);
+    expect(Object.keys(r.assignment)).toHaveLength(specialIds.length);
+    for (const id of specialIds) {
+      expect(Object.prototype.hasOwnProperty.call(r.assignment, id)).toBe(true);
+      expect(r.assignment[id]).toBe('CLOSED');
+    }
+  });
+
+  it('锁定 __proto__ / toString 被求解器遵守，其余仍 CLOSED 优先', () => {
+    const ws: Workspace = { ids: [...specialIds], rules: [] };
+    // 注意：__proto__ 必须落为自有属性（fromEntries / 计算属性键），
+    // 普通赋值或字面量 __proto__: 键会被原型访问器吞掉
+    const locks: Record<string, ShutterState> = Object.fromEntries(
+      [
+        ['__proto__', 'OPEN'],
+        ['toString', 'OPEN'],
+      ] as Array<[string, ShutterState]>,
+    );
+    const r = solveWorkspace(ws, locks);
+    expect(r.kind).toBe('sat');
+    if (r.kind !== 'sat') return;
+    expect(Object.keys(r.assignment)).toHaveLength(specialIds.length);
+    expect(r.assignment['__proto__']).toBe('OPEN');
+    expect(r.assignment['toString']).toBe('OPEN');
+    expect(r.assignment['OR']).toBe('CLOSED');
+    expect(r.assignment['constructor']).toBe('CLOSED');
+  });
+
+  it('特殊 ID 参与规则与锁定冲突：见证与闭环逐边合法', () => {
+    // __proto__ OPEN ∨ OR OPEN；两者均锁 CLOSED → 均矛盾，见证取字节序最小者 OR
+    const ws: Workspace = {
+      ids: ['__proto__', 'OR'],
+      rules: makeRules(['__proto__', 'OR'], [['__proto__', 'OPEN', 'OR', 'OPEN']]),
+    };
+    const locks: Record<string, ShutterState> = Object.fromEntries(
+      [
+        ['__proto__', 'CLOSED'],
+        ['OR', 'CLOSED'],
+      ] as Array<[string, ShutterState]>,
+    );
+    const r = solveWorkspace(ws, locks);
+    expect(r.kind).toBe('unsat');
+    if (r.kind !== 'unsat') return;
+    expect(r.witness.id).toBe('OR');
+    expectValidPath(ws, locks, 'OR', 'OPEN', r.witness.openToClosed, 'CLOSED');
+    expectValidPath(ws, locks, 'OR', 'CLOSED', r.witness.closedToOpen, 'OPEN');
+  });
+
+  it('改动列表覆盖特殊 ID（按 UTF-8 字节序）', () => {
+    // __proto__ OPEN ∨ OR OPEN：最小方案为 OR=CLOSED、__proto__=OPEN
+    const ws: Workspace = {
+      ids: ['__proto__', 'OR'],
+      rules: makeRules(['__proto__', 'OR'], [['__proto__', 'OPEN', 'OR', 'OPEN']]),
+    };
+    const r = solveWorkspace(ws, {});
+    expect(r.kind).toBe('sat');
+    if (r.kind !== 'sat') return;
+    expect(r.assignment['OR']).toBe('CLOSED');
+    expect(r.assignment['__proto__']).toBe('OPEN');
+    const current: Record<string, ShutterState> = Object.fromEntries(
+      [
+        ['__proto__', 'CLOSED'],
+        ['OR', 'OPEN'],
+      ] as Array<[string, ShutterState]>,
+    );
+    const changes = computeChanges(r.orderedIds, r.assignment, current);
+    expect(changes).toEqual([
+      { id: 'OR', from: 'OPEN', to: 'CLOSED' },
+      { id: '__proto__', from: 'CLOSED', to: 'OPEN' },
+    ]);
+  });
+});
+
+describe('特殊 ID 穷举交叉验证（__proto__ 与 OR，独立暴力枚举）', () => {
+  const ids = ['__proto__', 'OR'];
+  const defs: Array<[string, ShutterState, string, ShutterState]> = [];
+  for (const sa of STATES) for (const sb of STATES) {
+    defs.push(['__proto__', sa, 'OR', sb]);
+  }
+
+  const lockCases: Array<Record<string, ShutterState>> = [{}];
+  for (const sa of STATES) {
+    lockCases.push({ ['__proto__']: sa });
+    for (const sb of STATES) lockCases.push({ ['__proto__']: sa, OR: sb });
+  }
+
+  const cases: Array<{
+    mask: number;
+    chosen: typeof defs;
+    locks: Record<string, ShutterState>;
+  }> = [];
+  for (let mask = 0; mask < 1 << defs.length; mask++) {
+    const chosen = defs.filter((_, k) => (mask >> k) & 1);
+    for (const locks of lockCases) cases.push({ mask, chosen, locks });
+  }
+
+  it.each(cases)('规则子集 $mask + 锁定 $locks', ({ chosen, locks }) => {
+    const ws: Workspace = { ids: [...ids], rules: makeRules(ids, chosen) };
+    const got = solveWorkspace(ws, locks);
+    const want = bruteLexMinSafe(
+      ids,
+      chosen.map(([a, sa, b, sb]) => [{ id: a, state: sa }, { id: b, state: sb }]),
+      locks,
+    );
+    if (want === null) {
+      expect(got.kind).toBe('unsat');
+    } else {
+      expect(got.kind).toBe('sat');
+      if (got.kind === 'sat') {
+        // 方案完整且每个特殊 ID 都是自有条目
+        expect(Object.keys(got.assignment).sort()).toEqual([...ids].sort());
+        for (const id of ids) {
+          expect(Object.prototype.hasOwnProperty.call(got.assignment, id)).toBe(true);
+          expect(got.assignment[id]).toBe(want[id]);
+        }
+      }
+    }
+  });
+});

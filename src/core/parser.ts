@@ -25,6 +25,11 @@ interface RawRule {
  *   [rules]
  *   <ID> <OPEN|CLOSED> [OR] <ID> <OPEN|CLOSED>
  *   ...
+ *
+ * 规则按记号位置解析：首两个记号为第一个文字，末两个记号为第二个文字，
+ * 中间记号（若有）须全部为连接词 OR（大小写不敏感）。因此「OR」本身也
+ * 可以作为快门 ID 登记并在规则中引用；ID 仅不允许为 OPEN/CLOSED（与状态
+ * 记号冲突）。
  */
 export function parseWorkspace(text: string): ImportResult {
   const errors: string[] = [];
@@ -117,24 +122,33 @@ export function parseWorkspace(text: string): ImportResult {
     }
 
     // rules
+    // 按位置切分：首两个记号 = 第一文字，末两个记号 = 第二文字，中间记号
+    // （若有）须全部为连接词 OR（大小写不敏感；兼容旧版对重复 OR 的宽容）。
+    // 如此「OR」自身也能作为快门 ID 被引用，如「S1 OPEN OR CLOSED」、
+    // 「OR OPEN OR S1 CLOSED」。
     const tokens = line.split(/\s+/);
-    const filtered: string[] = [];
-    for (const tok of tokens) {
-      if (tok.toUpperCase() === 'OR') {
-        if (filtered.length !== 2) {
-          pushError(lineNo, `关键字 OR 只能出现在两个文字之间`);
-        }
-        continue;
+    let wellFormed = tokens.length >= 4;
+    for (let j = 2; j < tokens.length - 2; j++) {
+      if (tokens[j].toUpperCase() !== 'OR') {
+        wellFormed = false;
+        break;
       }
-      filtered.push(tok);
     }
-    if (filtered.length !== 4) {
-      pushError(lineNo, `规则必须恰好包含两个「快门ID 状态」文字（得到 ${filtered.length} 个记号）`);
+    if (!wellFormed) {
+      pushError(
+        lineNo,
+        `规则必须恰好包含两个「快门ID 状态」文字，连接词 OR 只能出现在两个文字之间（得到 ${tokens.length} 个记号）`,
+      );
       continue;
     }
     const onLine = new Set<string>();
-    const a = parseLiteral(filtered[0], filtered[1], lineNo, onLine);
-    const b = parseLiteral(filtered[2], filtered[3], lineNo, onLine);
+    const a = parseLiteral(tokens[0], tokens[1], lineNo, onLine);
+    const b = parseLiteral(
+      tokens[tokens.length - 2],
+      tokens[tokens.length - 1],
+      lineNo,
+      onLine,
+    );
     if (a && b) {
       rawRules.push({ lineNo, a, b, text: line });
     }
