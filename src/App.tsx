@@ -3,6 +3,11 @@ import type { ShutterState, SolveOutcome, Workspace } from './core/types';
 import { parseWorkspace } from './core/parser';
 import { computeChanges, solveWorkspace } from './core/sat';
 import { sortByUtf8 } from './core/utf8';
+import {
+  cloneStateMap,
+  emptyStateMap,
+  hasState,
+} from './core/maps';
 import { downloadText, serializeTable } from './lib/export';
 import { SAMPLE_WORKSPACE } from './lib/sample';
 import { ImportPanel } from './components/ImportPanel';
@@ -17,15 +22,19 @@ interface Preview {
 }
 
 function initialTable(ids: string[]): Record<string, ShutterState> {
-  const t: Record<string, ShutterState> = {};
+  const t = emptyStateMap();
   for (const id of ids) t[id] = 'CLOSED';
   return t;
 }
 
 export default function App() {
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
-  const [table, setTable] = useState<Record<string, ShutterState>>({});
-  const [locks, setLocks] = useState<Record<string, ShutterState>>({});
+  const [table, setTable] = useState<Record<string, ShutterState>>(() =>
+    emptyStateMap(),
+  );
+  const [locks, setLocks] = useState<Record<string, ShutterState>>(() =>
+    emptyStateMap(),
+  );
   /** 规则或锁定每次变化自增：使旧预览立即失效 */
   const [specRev, setSpecRev] = useState(0);
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -46,7 +55,7 @@ export default function App() {
     }
     setWorkspace(result.workspace);
     setTable(initialTable(result.workspace.ids));
-    setLocks({});
+    setLocks(emptyStateMap());
     setPreview(null);
     setAdopted(false);
     setSpecRev((r) => r + 1);
@@ -55,8 +64,8 @@ export default function App() {
 
   const handleToggleLock = (id: string) => {
     setLocks((prev) => {
-      const next = { ...prev };
-      if (id in next) {
+      const next = cloneStateMap(prev);
+      if (hasState(next, id)) {
         delete next[id];
       } else {
         // 锁定到该快门当前表值，随后可用按钮切换锁定状态
@@ -69,14 +78,20 @@ export default function App() {
 
   const handleCycleLockState = (id: string) => {
     setLocks((prev) => {
-      if (!(id in prev)) return prev;
-      return { ...prev, [id]: prev[id] === 'OPEN' ? 'CLOSED' : 'OPEN' };
+      if (!hasState(prev, id)) return prev;
+      const next = cloneStateMap(prev);
+      next[id] = prev[id] === 'OPEN' ? 'CLOSED' : 'OPEN';
+      return next;
     });
     setSpecRev((r) => r + 1);
   };
 
   const handleSetTable = (id: string, state: ShutterState) => {
-    setTable((prev) => ({ ...prev, [id]: state }));
+    setTable((prev) => {
+      const next = cloneStateMap(prev);
+      next[id] = state;
+      return next;
+    });
     setAdopted(false);
   };
 
@@ -89,7 +104,7 @@ export default function App() {
 
   const handleAdopt = () => {
     if (!preview || previewStale || preview.outcome.kind !== 'sat') return;
-    setTable({ ...preview.outcome.assignment });
+    setTable(cloneStateMap(preview.outcome.assignment));
     setAdopted(true);
   };
 

@@ -8,6 +8,7 @@ import type {
   Workspace,
 } from './types';
 import { minByUtf8, sortByUtf8 } from './utf8';
+import { cloneStateMap, emptyStateMap } from './maps';
 
 /**
  * 节点编码（i 为快门按 UTF-8 字节序排列后的变量下标）：
@@ -222,8 +223,9 @@ export function solveWorkspace(
 
   // 可行：按 ID 的 UTF-8 字节序逐变量贪试 CLOSED；
   // 已确定的前缀作为单位边并入 units，候选值单独以 extraUnit 试设，重算 SCC 检验。
-  const assignment: Record<string, ShutterState> = {};
-  const units: Record<string, ShutterState> = { ...locks };
+  const assignment = emptyStateMap();
+  // units 必须是无原型表：含 __proto__ 之类 ID 时，展开到普通对象会触发原型 setter。
+  const units = cloneStateMap(locks);
   for (let i = 0; i < base.sortedIds.length; i++) {
     const id = base.sortedIds[i];
     const tryState = (state: ShutterState): boolean => {

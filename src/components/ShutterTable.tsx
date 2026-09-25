@@ -1,4 +1,5 @@
 import type { ShutterState } from '../core/types';
+import { hasState } from '../core/maps';
 
 interface Props {
   ids: string[];
@@ -28,7 +29,8 @@ export function ShutterTable({
       </thead>
       <tbody>
         {ids.map((id) => {
-          const locked = id in locks;
+          // 只认真实锁定条目，避免 constructor/toString 等 ID 读到原型继承属性
+          const locked = hasState(locks, id);
           return (
             <tr key={id} data-testid={`shutter-row-${id}`}>
               <td className="mono">{id}</td>

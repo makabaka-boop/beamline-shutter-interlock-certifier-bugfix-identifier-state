@@ -77,6 +77,34 @@ describe('导入解析', () => {
     expect(r.errors.join('\n')).toContain('OPEN');
   });
 
+  it('OR 连接关键字（含小写 or）不能用作快门 ID', () => {
+    const r = parseWorkspace('[shutters]\nOR\nB\n[rules]\n');
+    expect(r.ok).toBe(false);
+    expect(r.workspace).toBeNull();
+    expect(r.errors.join('\n')).toContain('OR');
+
+    const r2 = parseWorkspace('[shutters]\nor\nB\n[rules]\n');
+    expect(r2.ok).toBe(false);
+    expect(r2.errors.join('\n')).toContain('or');
+  });
+
+  it('constructor / toString / __proto__ 是允许的快门 ID', () => {
+    const text = [
+      '[shutters]',
+      'constructor',
+      'toString',
+      '__proto__',
+      'A',
+      '[rules]',
+      'constructor OPEN OR toString CLOSED',
+      '__proto__ CLOSED OR A OPEN',
+    ].join('\n');
+    const r = parseWorkspace(text);
+    expect(r.ok, r.errors.join('\n')).toBe(true);
+    expect(r.workspace?.ids).toEqual(['constructor', 'toString', '__proto__', 'A']);
+    expect(r.workspace?.rules).toHaveLength(2);
+  });
+
   it('超限拒绝', () => {
     const many = Array.from({ length: MAX_SHUTTERS + 1 }, (_, i) => `X${i}`).join('\n');
     const r = parseWorkspace(`[shutters]\n${many}\n[rules]\n`);

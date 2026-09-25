@@ -102,8 +102,14 @@ export function parseWorkspace(text: string): ImportResult {
         pushError(lineNo, `快门 ID「${line}」不能包含空白字符`);
         continue;
       }
-      if ((line === 'OPEN' || line === 'CLOSED')) {
+      if (line === 'OPEN' || line === 'CLOSED') {
         pushError(lineNo, `快门 ID「${line}」与状态关键字冲突，不允许使用`);
+        continue;
+      }
+      // OR 是规则行中的连接关键字（大小写不敏感识别，见下方分词），
+      // 若放行同名快门，它将永远无法在规则中被引用，故在导入阶段一致拒绝。
+      if (line.toUpperCase() === 'OR') {
+        pushError(lineNo, `快门 ID「${line}」与规则连接关键字 OR 冲突，不允许使用`);
         continue;
       }
       const prev = seenIds.get(line);

@@ -21,10 +21,10 @@ Docker Compose 提供名为 `web` 的静态页面服务。
 
 ```
 [shutters]
-快门ID          # 每行一个，2–300 个，ID 唯一且不含空白、不得为 OPEN/CLOSED
+快门ID          # 每行一个，2–300 个，ID 唯一且不含空白、不得为 OPEN/CLOSED/OR
 ...
 [rules]
-ID1 OPEN  OR ID2 CLOSED     # OR 可省略；空行与 # 注释忽略
+ID1 OPEN  OR ID2 CLOSED     # OR 可省略（关键字大小写不敏感）；空行与 # 注释忽略
 ...
 ```
 
